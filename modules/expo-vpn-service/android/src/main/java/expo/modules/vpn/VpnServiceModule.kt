@@ -1,12 +1,8 @@
 package expo.modules.vpn
 
 import android.app.Activity
-import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
-import android.content.ServiceConnection
 import android.net.VpnService
-import android.os.IBinder
 import android.util.Log
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.Coded
@@ -30,7 +26,6 @@ class VpnServiceModule : Module() {
         }
     }
 
-    private var isBound = false
     private var currentPromise: Promise? = null
 
     override fun definition() = ModuleDefinition {
@@ -52,7 +47,8 @@ class VpnServiceModule : Module() {
         }
 
         AsyncFunction("hasPermission") { promise: Promise ->
-            val context = appContext.reactContext ?: run {
+            val context = appContext.reactContext
+            if (context == null) {
                 promise.reject(Error("Context not available"))
                 return@AsyncFunction
             }
@@ -62,7 +58,8 @@ class VpnServiceModule : Module() {
         }
 
         AsyncFunction("requestPermission") { promise: Promise ->
-            val context = appContext.reactContext ?: run {
+            val context = appContext.reactContext
+            if (context == null) {
                 promise.reject(Error("Context not available"))
                 return@AsyncFunction
             }
@@ -82,7 +79,8 @@ class VpnServiceModule : Module() {
         }
 
         AsyncFunction("start") { config: Map<String, Any>, promise: Promise ->
-            val context = appContext.reactContext ?: run {
+            val context = appContext.reactContext
+            if (context == null) {
                 promise.reject(Error("Context not available"))
                 return@AsyncFunction
             }
@@ -110,7 +108,8 @@ class VpnServiceModule : Module() {
         }
 
         AsyncFunction("stop") { promise: Promise ->
-            val context = appContext.reactContext ?: run {
+            val context = appContext.reactContext
+            if (context == null) {
                 promise.reject(Error("Context not available"))
                 return@AsyncFunction
             }
