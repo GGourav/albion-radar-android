@@ -35,8 +35,24 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: List project structure (debug)
+        run: ls -la
+
       - name: Generate Android native project
-        run: npx expo prebuild --platform android
+        run: npx expo prebuild --platform android --verbose
+
+      - name: List after prebuild (debug)
+        run: ls -la
+
+      - name: Check if android folder exists
+        run: |
+          if [ -d "android" ]; then
+            echo "Android folder exists"
+            ls -la android/
+          else
+            echo "Android folder does NOT exist"
+            exit 1
+          fi
 
       - name: Build Release APK
         run: |
