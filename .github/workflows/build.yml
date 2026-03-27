@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install React Native CLI
+        run: pnpm add -D @react-native-community/cli @react-native-community/cli-platform-android
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -41,21 +44,12 @@ jobs:
       - name: Create assets directory
         run: mkdir -p android/app/src/main/assets
 
-      - name: Find entry file
-        id: entry
-        run: |
-          if [ -f "index.js" ]; then
-            echo "entry=index.js" >> $GITHUB_OUTPUT
-          else
-            echo "entry=node_modules/expo/AppEntry.js" >> $GITHUB_OUTPUT
-          fi
-
       - name: Bundle JavaScript for release
         run: |
           npx react-native bundle \
             --platform android \
             --dev false \
-            --entry-file ${{ steps.entry.outputs.entry }} \
+            --entry-file node_modules/expo/AppEntry.js \
             --bundle-output android/app/src/main/assets/index.android.bundle \
             --assets-dest android/app/src/main/res
 
