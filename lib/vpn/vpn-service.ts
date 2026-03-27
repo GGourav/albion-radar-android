@@ -4,61 +4,98 @@
  * Intercepts UDP traffic on port 5056 (Albion Online game server port)
  */
 
+import { NativeModules, NativeEventEmitter, EmitterSubscription } from 'react-native';
 import { Buffer } from 'buffer';
-import { EventEmitter } from 'events';
+
+// Native module
+const { ExpoVpnService } = NativeModules;
 
 export interface VpnConfig {
+  targetPort?: number;
   mtu?: number;
-  dnsServers?: string[];
   allowedApps?: string[];
 }
 
 export interface PacketData {
-  sourceIp: string;
-  sourcePort: number;
-  destinationIp: string;
-  destinationPort: number;
-  data: Buffer;
+  data: number[];
   timestamp: number;
 }
 
-export class VpnService extends EventEmitter {
-  private config: VpnConfig;
-  private isActive: boolean = false;
-  private packetBuffer: PacketData[] = [];
+export interface VpnStatus {
+  isRunning: boolean;
+  packetsCaptured: number;
+  bytesCaptured: number;
+}
 
-  constructor(config: VpnConfig = {}) {
-    super();
-    this.config = {
-      mtu: config.mtu || 2048,
-      dnsServers: config.dnsServers || ['8.8.8.8', '8.8.4.4'],
-      allowedApps: config.allowedApps || ['com.albiononline'],
-    };
+export class VpnService {
+  private eventEmitter: NativeEventEmitter | null = null;
+  private listeners: Map<string, EmitterSubscription> = new Map();
+  private isActive: boolean = false;
+
+  constructor() {
+    if (ExpoVpnService) {
+      this.eventEmitter = new NativeEventEmitter(ExpoVpnService);
+    }
+  }
+
+  /**
+   * Check if VPN service is supported
+   */
+  async isSupported(): Promise<boolean> {
+    if (!ExpoVpnService) {
+      console.warn('Native VPN module not available');
+      return false;
+    }
+    return await ExpoVpnService.isSupported();
+  }
+
+  /**
+   * Check if VPN permission has been granted
+   */
+  async hasPermission(): Promise<boolean> {
+    if (!ExpoVpnService) {
+      return false;
+    }
+    return await ExpoVpnService.hasPermission();
+  }
+
+  /**
+   * Request VPN permission from user
+   */
+  async requestPermission(): Promise<boolean> {
+    if (!ExpoVpnService) {
+      throw new Error('Native VPN module not available');
+    }
+    return await ExpoVpnService.requestPermission();
   }
 
   /**
    * Starts the VPN service
-   * In a real Android implementation, this would:
-   * 1. Request VPN permission from the user
-   * 2. Create a VPN interface using VpnService.Builder
-   * 3. Set up packet capture on the TUN interface
-   * 4. Filter packets for port 5056
    */
-  async start(): Promise<void> {
+  async start(config: VpnConfig = {}): Promise<void> {
+    if (!ExpoVpnService) {
+      throw new Error('Native VPN module not available');
+    }
+
     if (this.isActive) {
       console.warn('VPN service is already active');
       return;
     }
 
+    const defaultConfig: VpnConfig = {
+      targetPort: 5056,
+      mtu: 2048,
+      allowedApps: ['com.albiononline'],
+      ...config,
+    };
+
     try {
-      // In a real implementation, this would call native Android code
-      // For now, we simulate the startup
-      console.log('Starting VPN service with config:', this.config);
+      this.setupListeners();
+      await ExpoVpnService.start(defaultConfig);
       this.isActive = true;
-      this.emit('started');
+      console.log('VPN service started successfully');
     } catch (error) {
       console.error('Failed to start VPN service:', error);
-      this.emit('error', error);
       throw error;
     }
   }
@@ -67,21 +104,38 @@ export class VpnService extends EventEmitter {
    * Stops the VPN service
    */
   async stop(): Promise<void> {
+    if (!ExpoVpnService) {
+      return;
+    }
+
     if (!this.isActive) {
       console.warn('VPN service is not active');
       return;
     }
 
     try {
-      // In a real implementation, this would call native Android code
-      console.log('Stopping VPN service');
+      await ExpoVpnService.stop();
+      this.removeAllListeners();
       this.isActive = false;
-      this.emit('stopped');
+      console.log('VPN service stopped');
     } catch (error) {
       console.error('Failed to stop VPN service:', error);
-      this.emit('error', error);
       throw error;
     }
+  }
+
+  /**
+   * Gets the current VPN status
+   */
+  async getStatus(): Promise<VpnStatus> {
+    if (!ExpoVpnService) {
+      return {
+        isRunning: false,
+        packetsCaptured: 0,
+        bytesCaptured: 0,
+      };
+    }
+    return await ExpoVpnService.getStatus();
   }
 
   /**
@@ -92,85 +146,95 @@ export class VpnService extends EventEmitter {
   }
 
   /**
-   * Processes a captured UDP packet
-   * Filters for port 5056 (Albion game server)
-   * Emits 'packet' event with the packet data
+   * Add a listener for packet events
    */
-  processPacket(packet: PacketData): void {
-    // Filter for Albion game server port (5056)
-    if (packet.destinationPort !== 5056 && packet.sourcePort !== 5056) {
+  onPacket(callback: (packet: Buffer) => void): void {
+    if (!this.eventEmitter) {
+      console.warn('Event emitter not available');
       return;
     }
 
-    // Emit packet event for listeners
-    this.emit('packet', packet);
+    const subscription = this.eventEmitter.addListener('onPacket', (event: PacketData) => {
+      const buffer = Buffer.from(event.data);
+      callback(buffer);
+    });
 
-    // Buffer packets for batch processing
-    this.packetBuffer.push(packet);
-
-    // Process buffer if it reaches a threshold (e.g., 16ms worth of packets)
-    if (this.packetBuffer.length >= 10) {
-      this.flushPacketBuffer();
-    }
+    this.listeners.set('onPacket', subscription);
   }
 
   /**
-   * Flushes the packet buffer and emits batch event
+   * Add a listener for status change events
    */
-  private flushPacketBuffer(): void {
-    if (this.packetBuffer.length === 0) {
+  onStatusChange(callback: (status: VpnStatus) => void): void {
+    if (!this.eventEmitter) {
       return;
     }
 
-    const packets = [...this.packetBuffer];
-    this.packetBuffer = [];
-    this.emit('packets', packets);
+    const subscription = this.eventEmitter.addListener('onStatusChange', callback);
+    this.listeners.set('onStatusChange', subscription);
   }
 
   /**
-   * Gets the current configuration
+   * Add a listener for error events
    */
-  getConfig(): VpnConfig {
-    return { ...this.config };
+  onError(callback: (error: { code: string; message: string }) => void): void {
+    if (!this.eventEmitter) {
+      return;
+    }
+
+    const subscription = this.eventEmitter.addListener('onError', callback);
+    this.listeners.set('onError', subscription);
   }
 
   /**
-   * Updates the VPN configuration
+   * Setup all event listeners
    */
-  updateConfig(config: Partial<VpnConfig>): void {
-    this.config = { ...this.config, ...config };
+  private setupListeners(): void {
+    if (!this.eventEmitter) {
+      return;
+    }
+
+    this.onStatusChange((status) => {
+      this.isActive = status.isRunning;
+      console.log('VPN status changed:', status);
+    });
+
+    this.onError((error) => {
+      console.error('VPN error:', error);
+    });
+  }
+
+  /**
+   * Remove all listeners
+   */
+  removeAllListeners(): void {
+    this.listeners.forEach((listener) => {
+      listener.remove();
+    });
+    this.listeners.clear();
   }
 }
 
 /**
  * Creates a new VPN service instance
  */
-export function createVpnService(config?: VpnConfig): VpnService {
-  return new VpnService(config);
+export function createVpnService(): VpnService {
+  return new VpnService();
 }
 
 /**
  * Filters a packet for Albion game traffic
- * Returns true if the packet should be processed
  */
-export function isAlbionGamePacket(packet: PacketData): boolean {
-  // Check if port is 5056 (Albion game server)
-  if (packet.destinationPort === 5056 || packet.sourcePort === 5056) {
+export function isAlbionGamePacket(data: Buffer): boolean {
+  if (data.length > 0 && data[0] === 0x3c) {
     return true;
   }
-
   return false;
 }
 
 /**
- * Extracts the Photon protocol data from a UDP packet
- * Skips UDP header (8 bytes) and returns the payload
+ * Extracts the Photon protocol data from a raw packet
  */
-export function extractPhotonPayload(packet: PacketData): Buffer {
-  // UDP header is 8 bytes, Photon data starts after that
-  if (packet.data.length > 8) {
-    return packet.data.subarray(8);
-  }
-
-  return packet.data;
+export function extractPhotonPayload(data: Buffer): Buffer {
+  return data;
 }
