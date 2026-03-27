@@ -4,10 +4,9 @@ import android.app.Activity
 import android.content.Intent
 import android.net.VpnService
 import expo.modules.kotlin.Promise
+import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
-import expo.modules.kotlin.activityresult.AppContextActivityResultContract
-import expo.modules.kotlin.activityresult.ActivityResultHandler
 
 class VpnServiceModule : Module() {
     companion object {
@@ -32,7 +31,7 @@ class VpnServiceModule : Module() {
         Function("requestVpnPermission") { promise: Promise ->
             val activity = appContext.activityProvider?.currentActivity
             if (activity == null) {
-                promise.reject("NO_ACTIVITY", "No current activity available")
+                promise.reject(CodedException("NO_ACTIVITY", "No current activity available", null))
                 return@Function
             }
 
@@ -43,11 +42,11 @@ class VpnServiceModule : Module() {
             } else {
                 // Need to request permission via intent
                 try {
-                    activity.startActivityForResult(intent, VPN_REQUEST_CODE)
-                    // Store promise to resolve later
                     pendingPermissionPromise = promise
+                    activity.startActivityForResult(intent, VPN_REQUEST_CODE)
                 } catch (e: Exception) {
-                    promise.reject("PERMISSION_ERROR", e.message)
+                    pendingPermissionPromise = null
+                    promise.reject(CodedException("PERMISSION_ERROR", e.message, e))
                 }
             }
         }
@@ -55,7 +54,7 @@ class VpnServiceModule : Module() {
         Function("startVpn") { promise: Promise ->
             val context = appContext.reactContext
             if (context == null) {
-                promise.reject("NO_CONTEXT", "No React context available")
+                promise.reject(CodedException("NO_CONTEXT", "No React context available", null))
                 return@Function
             }
 
@@ -65,10 +64,11 @@ class VpnServiceModule : Module() {
             if (vpnIntent != null) {
                 // Need VPN permission first
                 try {
-                    activity?.startActivityForResult(vpnIntent, VPN_REQUEST_CODE)
                     pendingStartPromise = promise
+                    activity?.startActivityForResult(vpnIntent, VPN_REQUEST_CODE)
                 } catch (e: Exception) {
-                    promise.reject("VPN_PERMISSION_ERROR", e.message)
+                    pendingStartPromise = null
+                    promise.reject(CodedException("VPN_PERMISSION_ERROR", e.message, e))
                 }
             } else {
                 // Already have permission, start VPN
@@ -79,7 +79,7 @@ class VpnServiceModule : Module() {
         Function("stopVpn") { promise: Promise ->
             val context = appContext.reactContext
             if (context == null) {
-                promise.reject("NO_CONTEXT", "No React context available")
+                promise.reject(CodedException("NO_CONTEXT", "No React context available", null))
                 return@Function
             }
 
@@ -89,7 +89,7 @@ class VpnServiceModule : Module() {
                 context.startService(intent)
                 promise.resolve(true)
             } catch (e: Exception) {
-                promise.reject("STOP_ERROR", e.message)
+                promise.reject(CodedException("STOP_ERROR", e.message, e))
             }
         }
 
@@ -111,10 +111,10 @@ class VpnServiceModule : Module() {
                     }
                 } else {
                     // Permission denied
-                    pendingPermissionPromise?.reject("PERMISSION_DENIED", "VPN permission denied by user")
+                    pendingPermissionPromise?.reject(CodedException("PERMISSION_DENIED", "VPN permission denied by user", null))
                     pendingPermissionPromise = null
                     
-                    pendingStartPromise?.reject("PERMISSION_DENIED", "VPN permission denied by user")
+                    pendingStartPromise?.reject(CodedException("PERMISSION_DENIED", "VPN permission denied by user", null))
                     pendingStartPromise = null
                 }
             }
@@ -127,7 +127,7 @@ class VpnServiceModule : Module() {
     private fun startVpnService(promise: Promise) {
         val context = appContext.reactContext
         if (context == null) {
-            promise.reject("NO_CONTEXT", "No React context available")
+            promise.reject(CodedException("NO_CONTEXT", "No React context available", null))
             return
         }
 
@@ -137,7 +137,7 @@ class VpnServiceModule : Module() {
             context.startService(intent)
             promise.resolve(true)
         } catch (e: Exception) {
-            promise.reject("START_ERROR", e.message)
+            promise.reject(CodedException("START_ERROR", e.message, e))
         }
     }
 }
