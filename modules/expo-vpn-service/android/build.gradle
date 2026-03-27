@@ -46,6 +46,9 @@ android {
 repositories {
     mavenCentral()
     google()
+    maven {
+        url "$projectDir/../../../node_modules/expo-modules-core/android/maven"
+    }
 }
 
 dependencies {
@@ -53,4 +56,7 @@ dependencies {
     implementation "androidx.core:core-ktx:1.12.0"
     implementation "androidx.appcompat:appcompat:1.6.1"
     implementation "com.facebook.react:react-native:+"
+    
+    // Expo modules core - required for expo modules
+    implementation project(':expo-modules-core')
 }
