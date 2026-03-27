@@ -1,0 +1,7 @@
+{
+  "name": "expo-vpn-service",
+  "platforms": ["android"],
+  "android": {
+    "modules": ["expo.modules.vpn.VpnServiceModule"]
+  }
+}
