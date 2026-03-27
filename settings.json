@@ -1,0 +1,7 @@
+{
+  "expo": {
+    "android": {
+      "modules": ["expo-vpn-service"]
+    }
+  }
+}
