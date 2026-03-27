@@ -26,9 +26,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install React Native CLI
-        run: pnpm add -D @react-native-community/cli @react-native-community/cli-platform-android
-
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -41,25 +38,11 @@ jobs:
       - name: Generate Android native project
         run: npx expo prebuild --platform android
 
-      - name: Create assets directory
-        run: mkdir -p android/app/src/main/assets
+      - name: Export bundled assets
+        run: npx expo export --platform android --output-dir ./android/app/src/main/assets
 
-      - name: Bundle JavaScript for release
-        run: |
-          npx react-native bundle \
-            --platform android \
-            --dev false \
-            --entry-file node_modules/expo/AppEntry.js \
-            --bundle-output android/app/src/main/assets/index.android.bundle \
-            --assets-dest android/app/src/main/res
-
-      - name: Verify bundle exists
-        run: |
-          ls -la android/app/src/main/assets/
-          if [ ! -f "android/app/src/main/assets/index.android.bundle" ]; then
-            echo "Bundle not created!"
-            exit 1
-          fi
+      - name: List exported assets
+        run: ls -la ./android/app/src/main/assets/
 
       - name: Build Release APK
         run: |
