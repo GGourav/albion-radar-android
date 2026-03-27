@@ -1,67 +1,60 @@
-name: Build Android APK
+name: Build Release APK
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [main, master]
   pull_request:
-    branches:
-      - main
-      - master
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Debug APK
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'pnpm'
 
-      - name: Setup Java 17
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Create local.properties
-        run: |
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-
-      - name: Prebuild native Android project
-        run: npx expo prebuild --platform android --clean
-
-      - name: Build Debug APK
+      - name: Generate Android bundle (release)
         run: |
           cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew bundleRelease
 
-      - name: Rename APK
+      - name: Build Release APK
         run: |
-          mv android/app/build/outputs/apk/debug/app-debug.apk \
-             android/app/build/outputs/apk/debug/albion-radar-debug.apk
+          cd android
+          ./gradlew assembleRelease
 
-      - name: Upload APK artifact
+      - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: albion-radar-apk
-          path: android/app/build/outputs/apk/debug/albion-radar-debug.apk
+          name: albion-radar-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
+
+      - name: Upload AAB (for Play Store)
+        uses: actions/upload-artifact@v4
+        with:
+          name: albion-radar-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
           retention-days: 30
