@@ -1,11 +1,19 @@
-const { getDefaultConfig } = require("expo/metro-config");
-const { withNativeWind } = require("nativewind/metro");
+const { getDefaultConfig } = require('expo/metro-config');
+const path = require('path');
 
-const config = getDefaultConfig(__dirname);
+const projectRoot = __dirname;
+const config = getDefaultConfig(projectRoot);
 
-module.exports = withNativeWind(config, {
-  input: "./global.css",
-  // Force write CSS to file system instead of virtual modules
-  // This fixes iOS styling issues in development mode
-  forceWriteFileSystem: true,
-});
+// Add local modules to watch paths
+const modulesRoot = path.join(projectRoot, 'modules');
+config.watchFolders = [modulesRoot];
+
+// Add additional asset extensions
+config.resolver.assetExts.push(
+  // Add any additional extensions here
+);
+
+// Configure source extensions
+config.resolver.sourceExts = ['jsx', 'js', 'ts', 'tsx', 'json'];
+
+module.exports = config;
