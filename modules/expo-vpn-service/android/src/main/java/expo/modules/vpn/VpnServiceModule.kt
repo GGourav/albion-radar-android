@@ -3,164 +3,141 @@ package expo.modules.vpn
 import android.app.Activity
 import android.content.Intent
 import android.net.VpnService
-import android.util.Log
-import expo.modules.core.Promise
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.activityresult.AppContextActivityResultContract
+import expo.modules.kotlin.activityresult.ActivityResultHandler
 
 class VpnServiceModule : Module() {
-
     companion object {
-        const val TAG = "VpnServiceModule"
-        const val VPN_REQUEST_CODE = 1000
-
-        private var instance: VpnServiceModule? = null
-
-        fun sendPacket(data: ByteArray) {
-            instance?.sendPacketEvent(data)
-        }
-
-        fun sendStatusUpdate() {
-            instance?.sendStatusEvent()
-        }
+        private const val VPN_REQUEST_CODE = 1001
     }
-
-    private var currentPromise: Promise? = null
 
     override fun definition() = ModuleDefinition {
         Name("ExpoVpnService")
 
-        Events("onPacket", "onStatusChange", "onError")
+        Events("onVpnStateChanged", "onPacketReceived", "onError")
 
-        OnCreate {
-            instance = this@VpnServiceModule
-            Log.d(TAG, "VpnServiceModule created")
+        Function("hasVpnPermission") {
+            val activity = appContext.activityProvider?.currentActivity
+            if (activity == null) {
+                false
+            } else {
+                val intent = VpnService.prepare(activity)
+                intent == null
+            }
         }
 
-        OnDestroy {
-            instance = null
-        }
-
-        AsyncFunction("isSupported") { promise: Promise ->
-            promise.resolve(true)
-        }
-
-        AsyncFunction("hasPermission") { promise: Promise ->
-            val context = appContext.reactContext
-            if (context == null) {
-                promise.reject("ERROR", "Context not available")
-                return@AsyncFunction
+        Function("requestVpnPermission") { promise: Promise ->
+            val activity = appContext.activityProvider?.currentActivity
+            if (activity == null) {
+                promise.reject("NO_ACTIVITY", "No current activity available")
+                return@Function
             }
 
-            val intent = VpnService.prepare(context)
-            promise.resolve(intent == null)
-        }
-
-        AsyncFunction("requestPermission") { promise: Promise ->
-            val context = appContext.reactContext
-            if (context == null) {
-                promise.reject("ERROR", "Context not available")
-                return@AsyncFunction
-            }
-
-            val intent = VpnService.prepare(context)
+            val intent = VpnService.prepare(activity)
             if (intent == null) {
+                // Already have permission
                 promise.resolve(true)
             } else {
-                currentPromise = promise
-                val activity = appContext.currentActivity
-                if (activity != null) {
+                // Need to request permission via intent
+                try {
                     activity.startActivityForResult(intent, VPN_REQUEST_CODE)
-                } else {
-                    promise.reject("ERROR", "No activity available")
+                    // Store promise to resolve later
+                    pendingPermissionPromise = promise
+                } catch (e: Exception) {
+                    promise.reject("PERMISSION_ERROR", e.message)
                 }
             }
         }
 
-        AsyncFunction("start") { config: Map<String, Any>, promise: Promise ->
+        Function("startVpn") { promise: Promise ->
             val context = appContext.reactContext
             if (context == null) {
-                promise.reject("ERROR", "Context not available")
-                return@AsyncFunction
+                promise.reject("NO_CONTEXT", "No React context available")
+                return@Function
             }
 
-            val intent = VpnService.prepare(context)
-            if (intent != null) {
-                promise.reject("PERMISSION_ERROR", "VPN permission not granted")
-                return@AsyncFunction
-            }
-
-            try {
-                val serviceIntent = Intent(context, AlbionVpnService::class.java)
-                
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    context.startForegroundService(serviceIntent)
-                } else {
-                    context.startService(serviceIntent)
+            val activity = appContext.activityProvider?.currentActivity
+            val vpnIntent = VpnService.prepare(context)
+            
+            if (vpnIntent != null) {
+                // Need VPN permission first
+                try {
+                    activity?.startActivityForResult(vpnIntent, VPN_REQUEST_CODE)
+                    pendingStartPromise = promise
+                } catch (e: Exception) {
+                    promise.reject("VPN_PERMISSION_ERROR", e.message)
                 }
-
-                promise.resolve(null)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error starting VPN: ${e.message}")
-                promise.reject("ERROR", e.message)
+            } else {
+                // Already have permission, start VPN
+                startVpnService(promise)
             }
         }
 
-        AsyncFunction("stop") { promise: Promise ->
+        Function("stopVpn") { promise: Promise ->
             val context = appContext.reactContext
             if (context == null) {
-                promise.reject("ERROR", "Context not available")
-                return@AsyncFunction
+                promise.reject("NO_CONTEXT", "No React context available")
+                return@Function
             }
 
             try {
-                val serviceIntent = Intent(context, AlbionVpnService::class.java)
-                context.stopService(serviceIntent)
-                promise.resolve(null)
+                val intent = Intent(context, AlbionVpnService::class.java)
+                intent.action = AlbionVpnService.ACTION_DISCONNECT
+                context.startService(intent)
+                promise.resolve(true)
             } catch (e: Exception) {
-                Log.e(TAG, "Error stopping VPN: ${e.message}")
-                promise.reject("ERROR", e.message)
+                promise.reject("STOP_ERROR", e.message)
             }
         }
 
-        AsyncFunction("getStatus") { promise: Promise ->
-            val status = mapOf(
-                "isRunning" to AlbionVpnService.isRunning,
-                "packetsCaptured" to AlbionVpnService.packetsCaptured,
-                "bytesCaptured" to AlbionVpnService.bytesCaptured
-            )
-            promise.resolve(status)
+        Function("isVpnRunning") {
+            AlbionVpnService.isRunning
         }
 
-        OnActivityResult { activity, requestCode, resultCode, data ->
-            if (requestCode == VPN_REQUEST_CODE) {
-                val promise = currentPromise
-                currentPromise = null
-
-                if (resultCode == Activity.RESULT_OK) {
-                    promise?.resolve(true)
+        OnActivityResult { activity, payload ->
+            if (payload.requestCode == VPN_REQUEST_CODE) {
+                if (payload.resultCode == Activity.RESULT_OK) {
+                    // Permission granted
+                    pendingPermissionPromise?.resolve(true)
+                    pendingPermissionPromise = null
+                    
+                    // If there was a pending start request, start VPN now
+                    pendingStartPromise?.let { promise ->
+                        startVpnService(promise)
+                        pendingStartPromise = null
+                    }
                 } else {
-                    promise?.resolve(false)
+                    // Permission denied
+                    pendingPermissionPromise?.reject("PERMISSION_DENIED", "VPN permission denied by user")
+                    pendingPermissionPromise = null
+                    
+                    pendingStartPromise?.reject("PERMISSION_DENIED", "VPN permission denied by user")
+                    pendingStartPromise = null
                 }
             }
         }
     }
 
-    fun sendPacketEvent(data: ByteArray) {
-        val eventData = mapOf(
-            "data" to data.toList(),
-            "timestamp" to System.currentTimeMillis()
-        )
-        sendEvent("onPacket", eventData)
-    }
+    private var pendingPermissionPromise: Promise? = null
+    private var pendingStartPromise: Promise? = null
 
-    fun sendStatusEvent() {
-        val status = mapOf(
-            "isRunning" to AlbionVpnService.isRunning,
-            "packetsCaptured" to AlbionVpnService.packetsCaptured,
-            "bytesCaptured" to AlbionVpnService.bytesCaptured,
-            "timestamp" to System.currentTimeMillis()
-        )
-        sendEvent("onStatusChange", status)
+    private fun startVpnService(promise: Promise) {
+        val context = appContext.reactContext
+        if (context == null) {
+            promise.reject("NO_CONTEXT", "No React context available")
+            return
+        }
+
+        try {
+            val intent = Intent(context, AlbionVpnService::class.java)
+            intent.action = AlbionVpnService.ACTION_CONNECT
+            context.startService(intent)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("START_ERROR", e.message)
+        }
     }
 }
