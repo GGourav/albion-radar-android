@@ -1,257 +1,234 @@
 package expo.modules.vpn
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.net.VpnService
-import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import expo.modules.kotlin.AppContext
+import expo.modules.kotlin.modules.Module
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 class AlbionVpnService : VpnService() {
-
     companion object {
         const val TAG = "AlbionVpnService"
-        const val NOTIFICATION_ID = 1001
-        const val CHANNEL_ID = "albion_vpn_channel"
-        const val TARGET_PORT = 5056
-        const val MTU = 2048
-
+        const val ACTION_CONNECT = "expo.modules.vpn.CONNECT"
+        const val ACTION_DISCONNECT = "expo.modules.vpn.DISCONNECT"
+        
         @Volatile
-        var isRunning = false
+        var isRunning: Boolean = false
             private set
-
-        @Volatile
-        var packetsCaptured = 0L
-            private set
-
-        @Volatile
-        var bytesCaptured = 0L
-            private set
-
-        private var packetListener: ((ByteArray) -> Unit)? = null
-
-        fun setPacketListener(listener: (ByteArray) -> Unit) {
-            packetListener = listener
+        
+        private var instance: AlbionVpnService? = null
+        
+        fun sendPacket(data: ByteArray) {
+            instance?.let { service ->
+                try {
+                    service.packetQueue?.add(data)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error queueing packet: ${e.message}")
+                }
+            }
         }
-
-        fun clearPacketListener() {
-            packetListener = null
+        
+        fun sendStatusUpdate(status: String) {
+            instance?.let { service ->
+                try {
+                    service.status = status
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error updating status: ${e.message}")
+                }
+            }
         }
     }
 
     private var vpnInterface: ParcelFileDescriptor? = null
-    private var vpnThread: Thread? = null
-    private var running = false
+    private var isRunningVpn = false
+    private var packetQueue: java.util.concurrent.ConcurrentLinkedQueue<ByteArray>? = null
+    private var status: String = "disconnected"
+    private var workerThread: Thread? = null
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "VPN service starting...")
-
-        if (running) {
-            Log.w(TAG, "VPN service already running")
-            return START_STICKY
-        }
-
-        // Start foreground service
-        startForeground(NOTIFICATION_ID, createNotification())
-
-        // Setup VPN interface
-        vpnInterface = setupVpnInterface()
-
-        if (vpnInterface == null) {
-            Log.e(TAG, "Failed to create VPN interface")
-            stopSelf()
-            return START_NOT_STICKY
-        }
-
-        running = true
-        isRunning = true
-
-        // Start packet capture thread
-        vpnThread = Thread { capturePackets() }
-        vpnThread?.start()
-
-        Log.d(TAG, "VPN service started successfully")
-        VpnServiceModule.sendStatusUpdate()
-
-        return START_STICKY
-    }
-
-    private fun setupVpnInterface(): ParcelFileDescriptor? {
-        return try {
-            Builder()
-                .setSession("Albion Radar VPN")
-                .setMtu(MTU)
-                .addAddress("10.0.0.2", 32)
-                .addRoute("0.0.0.0", 0)
-                .addDnsServer("8.8.8.8")
-                .addDnsServer("8.8.4.4")
-                .also { builder ->
-                    // Allow all apps (we filter in the packet capture)
-                    // To restrict to Albion Online only:
-                    // builder.addAllowedApplication("com.albiononline")
-                }
-                .establish()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error setting up VPN interface: ${e.message}")
-            null
-        }
-    }
-
-    private fun capturePackets() {
-        val vpnInput = FileInputStream(vpnInterface?.fileDescriptor)
-        val vpnOutput = FileOutputStream(vpnInterface?.fileDescriptor)
-        val buffer = ByteBuffer.allocate(MTU)
-
-        Log.d(TAG, "Starting packet capture loop")
-
-        while (running && vpnInterface != null) {
-            try {
-                // Read packet from TUN interface
-                buffer.clear()
-                val length = vpnInput.read(buffer.array())
-
-                if (length > 0) {
-                    packetsCaptured++
-                    bytesCaptured += length
-
-                    // Parse IP header to get protocol and ports
-                    val packetData = buffer.array().sliceArray(0 until length)
-
-                    // Check if this is a UDP packet on port 5056
-                    if (isAlbionPacket(packetData, length)) {
-                        // Extract the UDP payload (Photon data)
-                        val photonData = extractPhotonPayload(packetData, length)
-
-                        if (photonData != null) {
-                            // Notify listener
-                            packetListener?.invoke(photonData)
-
-                            // Send to React Native
-                            VpnServiceModule.sendPacket(photonData)
-                        }
-                    }
-
-                    // Write packet back (passthrough)
-                    vpnOutput.write(packetData)
-                    vpnOutput.flush()
-                }
-
-            } catch (e: Exception) {
-                if (running) {
-                    Log.e(TAG, "Error capturing packet: ${e.message}")
-                }
-            }
-        }
-
-        Log.d(TAG, "Packet capture loop ended")
-    }
-
-    private fun isAlbionPacket(packet: ByteArray, length: Int): Boolean {
-        if (length < 28) return false
-
-        // IP header version (first 4 bits)
-        val version = (packet[0].toInt() shr 4) and 0x0F
-        if (version != 4) return false // Only IPv4
-
-        // Protocol (byte 9)
-        val protocol = packet[9].toInt() and 0xFF
-        if (protocol != 17) return false // 17 = UDP
-
-        // UDP header starts at byte 20 for IPv4
-        // Source port (bytes 20-21), Destination port (bytes 22-23)
-        val sourcePort = ((packet[20].toInt() and 0xFF) shl 8) or (packet[21].toInt() and 0xFF)
-        val destPort = ((packet[22].toInt() and 0xFF) shl 8) or (packet[23].toInt() and 0xFF)
-
-        return sourcePort == TARGET_PORT || destPort == TARGET_PORT
-    }
-
-    private fun extractPhotonPayload(packet: ByteArray, length: Int): ByteArray? {
-        if (length < 28) return null
-
-        // UDP header is 8 bytes, so data starts at byte 28
-        // UDP length field (bytes 24-25) includes header
-        val udpLength = ((packet[24].toInt() and 0xFF) shl 8) or (packet[25].toInt() and 0xFF)
-        val payloadLength = udpLength - 8
-
-        if (payloadLength <= 0 || 28 + payloadLength > length) return null
-
-        return packet.sliceArray(28 until 28 + payloadLength)
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Albion Radar VPN Service",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "VPN service for Albion Radar packet capture"
-                setShowBadge(false)
-            }
-
-            val notificationManager = getSystemService(NotificationManager::class.java)
-            notificationManager.createNotificationChannel(channel)
-        }
-    }
-
-    private fun createNotification(): Notification {
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            packageManager.getLaunchIntentForPackage(packageName),
-            PendingIntent.FLAG_IMMUTABLE
-        )
-
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle("Albion Radar Active")
-                .setContentText("Capturing game packets...")
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentIntent(pendingIntent)
-                .setOngoing(true)
-                .build()
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-                .setContentTitle("Albion Radar Active")
-                .setContentText("Capturing game packets...")
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentIntent(pendingIntent)
-                .setOngoing(true)
-                .build()
-        }
+        instance = this
+        packetQueue = java.util.concurrent.ConcurrentLinkedQueue()
     }
 
     override fun onDestroy() {
-        Log.d(TAG, "VPN service destroying...")
-        running = false
-        isRunning = false
-
-        vpnThread?.interrupt()
-        vpnThread = null
-
-        vpnInterface?.close()
-        vpnInterface = null
-
-        VpnServiceModule.sendStatusUpdate()
+        stopVpn()
+        instance = null
+        packetQueue = null
         super.onDestroy()
     }
 
-    override fun onRevoke() {
-        Log.d(TAG, "VPN permission revoked")
-        stopSelf()
-        super.onRevoke()
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_CONNECT -> {
+                startVpn()
+            }
+            ACTION_DISCONNECT -> {
+                stopVpn()
+            }
+        }
+        return START_STICKY
+    }
+
+    private fun startVpn() {
+        if (isRunningVpn) return
+
+        try {
+            // Configure VPN interface
+            val builder = Builder()
+                .setSession("AlbionRadar")
+                .addAddress("10.0.0.2", 32)
+                .addRoute("0.0.0.0", 0)
+                .setMtu(1500)
+            
+            // Try to exclude Albion server port from VPN
+            // This allows the game traffic to pass through while we monitor
+            try {
+                builder.addDisallowedApplication("com.sandboxinteractive.albiononline")
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not exclude Albion app: ${e.message}")
+            }
+
+            vpnInterface = builder.establish()
+            
+            if (vpnInterface == null) {
+                Log.e(TAG, "Failed to establish VPN interface")
+                return
+            }
+
+            isRunningVpn = true
+            isRunning = true
+            status = "connected"
+            
+            // Start packet processing thread
+            startPacketProcessing()
+            
+            Log.i(TAG, "VPN service started successfully")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error starting VPN: ${e.message}")
+            status = "error: ${e.message}"
+            stopVpn()
+        }
+    }
+
+    private fun stopVpn() {
+        isRunningVpn = false
+        isRunning = false
+        status = "disconnected"
+        
+        workerThread?.interrupt()
+        workerThread = null
+        
+        vpnInterface?.close()
+        vpnInterface = null
+        
+        packetQueue?.clear()
+        
+        Log.i(TAG, "VPN service stopped")
+    }
+
+    private fun startPacketProcessing() {
+        workerThread = Thread {
+            val buffer = ByteBuffer.allocate(32767)
+            val inputStream = FileInputStream(vpnInterface!!.fileDescriptor)
+            
+            while (isRunningVpn && !Thread.currentThread().isInterrupted) {
+                try {
+                    // Read packet from VPN interface
+                    buffer.clear()
+                    val length = inputStream.read(buffer.array())
+                    
+                    if (length > 0) {
+                        buffer.limit(length)
+                        processPacket(buffer.array(), length)
+                    }
+                    
+                    // Process outgoing packets from queue
+                    packetQueue?.poll()?.let { packet ->
+                        writeToVpn(packet)
+                    }
+                    
+                } catch (e: Exception) {
+                    if (isRunningVpn) {
+                        Log.e(TAG, "Error processing packets: ${e.message}")
+                    }
+                    break
+                }
+            }
+        }.apply {
+            start()
+        }
+    }
+
+    private fun writeToVpn(data: ByteArray) {
+        try {
+            vpnInterface?.fileDescriptor?.let { fd ->
+                val outputStream = FileOutputStream(fd)
+                outputStream.write(data)
+                outputStream.flush()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error writing to VPN: ${e.message}")
+        }
+    }
+
+    private fun processPacket(data: ByteArray, length: Int) {
+        if (length < 20) return // Minimum IP header size
+        
+        try {
+            // Parse IP header
+            val version = (data[0].toInt() shr 4) and 0x0F
+            if (version != 4) return // Only IPv4
+            
+            // Get source and destination ports (TCP/UDP)
+            val protocol = data[9].toInt() and 0xFF
+            val srcPort = ((data[20].toInt() and 0xFF) shl 8) or (data[21].toInt() and 0xFF)
+            val dstPort = ((data[22].toInt() and 0xFF) shl 8) or (data[23].toInt() and 0xFF)
+            
+            // Check if this is Albion traffic (port 5056)
+            if (srcPort == 5056 || dstPort == 5056) {
+                // Extract payload
+                val ipHeaderLength = (data[0].toInt() and 0x0F) * 4
+                val transportHeaderLength = if (protocol == 6) 20 else 8 // TCP or UDP
+                
+                val payloadStart = ipHeaderLength + transportHeaderLength
+                if (length > payloadStart) {
+                    val payload = data.copyOfRange(payloadStart, length)
+                    parseAlbionPacket(payload)
+                }
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing packet: ${e.message}")
+        }
+    }
+
+    private fun parseAlbionPacket(payload: ByteArray) {
+        if (payload.size < 2) return
+        
+        try {
+            // Albion uses Photon Protocol (Protocol16)
+            // Try to extract event type and data
+            val eventType = (payload[0].toInt() and 0xFF)
+            
+            // Log for debugging
+            Log.d(TAG, "Albion packet: type=$eventType size=${payload.size}")
+            
+            // TODO: Parse specific Albion events
+            // - Player movement
+            // - Mob spawns
+            // - Resource nodes
+            // - Combat events
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing Albion packet: ${e.message}")
+        }
     }
 }
