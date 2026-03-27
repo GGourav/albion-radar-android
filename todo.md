@@ -48,27 +48,27 @@
 
 ## Phase 5: UI and Display Modes
 
-- [ ] Floating overlay implementation (WindowManager)
-- [ ] Overlay position and size configuration
-- [ ] Overlay transparency and opacity controls
-- [ ] Full-screen radar activity
-- [ ] Radar zoom and pan controls
-- [ ] Entity detail view
-- [ ] Settings screen
-- [ ] Filter configuration UI
-- [ ] VPN status indicator
-- [ ] Quick-settings tile for overlay toggle
+- [x] Floating overlay implementation (WindowManager)
+- [x] Overlay position and size configuration
+- [x] Overlay transparency and opacity controls
+- [x] Full-screen radar activity
+- [x] Radar zoom and pan controls
+- [x] Entity detail view
+- [x] Settings screen
+- [x] Filter configuration UI
+- [x] VPN status indicator
+- [x] Quick-settings tile for overlay toggle
 
 ## Phase 6: Data Management
 
-- [ ] Bundled data loading (mobs.json, resources.json, zones.json)
-- [ ] Remote data endpoint integration
-- [ ] Version checking and update detection
-- [ ] Delta update mechanism
-- [ ] Fallback to bundled data on network error
-- [ ] Background sync scheduler
-- [ ] Data validation and error handling
-- [ ] SQLite migration system
+- [x] Bundled data loading (mobs.json, resources.json, zones.json)
+- [x] Remote data endpoint integration
+- [x] Version checking and update detection
+- [x] Delta update mechanism
+- [x] Fallback to bundled data on network error
+- [x] Background sync scheduler
+- [x] Data validation and error handling
+- [x] SQLite migration system
 
 ## Phase 7: Performance and Optimization
 
