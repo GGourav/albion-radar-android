@@ -34,125 +34,73 @@ export interface MobDefinition {
   icon: string;
 }
 
+// Import full mob data from JSON
+import mobData from '../../data/mobs.json';
+
 /**
- * Mob type mapping (inherited from QRadar)
+ * Mob type mapping - Auto-generated from data/mobs.json
  * Maps TypeID to mob information
- * This is a sample set; the full mapping should be loaded from data files
  */
-export const MOB_DEFINITIONS: Record<number, MobDefinition> = {
-  // Tier 1 Skinnable Animals
-  1: {
-    typeId: 1,
-    mobCode: 'Deer',
-    mobName: 'Deer',
-    tier: 1,
-    category: MobCategory.Skinnable,
-    threatLevel: ThreatLevel.Safe,
-    isSkinnable: true,
-    icon: 'deer',
-  },
+export const MOB_DEFINITIONS: Record<number, MobDefinition> = {};
 
-  2: {
-    typeId: 2,
-    mobCode: 'Rabbit',
-    mobName: 'Rabbit',
-    tier: 1,
-    category: MobCategory.Skinnable,
-    threatLevel: ThreatLevel.Safe,
-    isSkinnable: true,
-    icon: 'rabbit',
-  },
+// Initialize mob definitions from JSON data
+function initializeMobDefinitions(): void {
+  for (const entry of mobData) {
+    const category = mapCategory(entry.Category);
+    const tier = entry.Tier;
+    
+    MOB_DEFINITIONS[entry.TypeId] = {
+      typeId: entry.TypeId,
+      mobCode: entry.MobCode,
+      mobName: entry.MobName,
+      tier: tier,
+      category: category,
+      threatLevel: calculateThreatFromTier(tier, category),
+      isBoss: category === MobCategory.Boss,
+      isMistBoss: category === MobCategory.MistBoss,
+      isDrone: category === MobCategory.Drone,
+      isSkinnable: category === MobCategory.Skinnable,
+      icon: entry.MobCode.toLowerCase(),
+    };
+  }
+}
 
-  // Tier 2 Mobs
-  3: {
-    typeId: 3,
-    mobCode: 'Wolf',
-    mobName: 'Wolf',
-    tier: 2,
-    category: MobCategory.Normal,
-    threatLevel: ThreatLevel.Caution,
-    icon: 'wolf',
-  },
+/**
+ * Maps string category to enum
+ */
+function mapCategory(categoryStr: string): MobCategory {
+  const categoryMap: Record<string, MobCategory> = {
+    'Normal': MobCategory.Normal,
+    'Enchanted': MobCategory.Enchanted,
+    'MiniBoss': MobCategory.MiniBoss,
+    'Boss': MobCategory.Boss,
+    'MistBoss': MobCategory.MistBoss,
+    'Drone': MobCategory.Drone,
+    'Skinnable': MobCategory.Skinnable,
+  };
+  return categoryMap[categoryStr] || MobCategory.Normal;
+}
 
-  4: {
-    typeId: 4,
-    mobCode: 'Bear',
-    mobName: 'Bear',
-    tier: 2,
-    category: MobCategory.Normal,
-    threatLevel: ThreatLevel.Caution,
-    icon: 'bear',
-  },
+/**
+ * Calculates threat level from tier and category
+ */
+function calculateThreatFromTier(tier: number, category: MobCategory): ThreatLevel {
+  if (category === MobCategory.Boss || category === MobCategory.MistBoss) {
+    return ThreatLevel.Extreme;
+  }
+  
+  if (category === MobCategory.MiniBoss) {
+    return tier >= 7 ? ThreatLevel.Extreme : ThreatLevel.Danger;
+  }
+  
+  if (tier >= 8) return ThreatLevel.Extreme;
+  if (tier >= 6) return ThreatLevel.Danger;
+  if (tier >= 4) return ThreatLevel.Caution;
+  return ThreatLevel.Safe;
+}
 
-  // Tier 3 Mobs
-  111: {
-    typeId: 111,
-    mobCode: 'Veilweaver',
-    mobName: 'Veilweaver',
-    tier: 3,
-    category: MobCategory.Normal,
-    threatLevel: ThreatLevel.Danger,
-    icon: 'veilweaver',
-  },
-
-  // Tier 4 Mobs
-  112: {
-    typeId: 112,
-    mobCode: 'Gorgon',
-    mobName: 'Gorgon',
-    tier: 4,
-    category: MobCategory.Normal,
-    threatLevel: ThreatLevel.Danger,
-    icon: 'gorgon',
-  },
-
-  // Tier 4 Dragons
-  304: {
-    typeId: 304,
-    mobCode: 'Fairydragon',
-    mobName: 'Fairy Dragon',
-    tier: 4,
-    category: MobCategory.Normal,
-    threatLevel: ThreatLevel.Extreme,
-    icon: 'fairydragon',
-  },
-
-  // Bosses
-  1337: {
-    typeId: 1337,
-    mobCode: 'Nameless',
-    mobName: 'Nameless Boss',
-    tier: 8,
-    category: MobCategory.Boss,
-    threatLevel: ThreatLevel.Extreme,
-    isBoss: true,
-    icon: 'nameless',
-  },
-
-  // Mist Bosses
-  2000: {
-    typeId: 2000,
-    mobCode: 'MistBoss',
-    mobName: 'Mist Boss',
-    tier: 8,
-    category: MobCategory.MistBoss,
-    threatLevel: ThreatLevel.Extreme,
-    isMistBoss: true,
-    icon: 'mistboss',
-  },
-
-  // Drones
-  3000: {
-    typeId: 3000,
-    mobCode: 'Drone',
-    mobName: 'Resource Drone',
-    tier: 5,
-    category: MobCategory.Drone,
-    threatLevel: ThreatLevel.Caution,
-    isDrone: true,
-    icon: 'drone',
-  },
-};
+// Initialize on load
+initializeMobDefinitions();
 
 /**
  * Gets mob definition by typeId
@@ -169,7 +117,6 @@ export function getMobName(typeId: number): string {
   if (!def) {
     return `Unknown Mob (${typeId})`;
   }
-
   return def.mobName;
 }
 
@@ -181,7 +128,6 @@ export function getMobIcon(typeId: number): string {
   if (!def) {
     return 'unknown';
   }
-
   return def.icon;
 }
 
@@ -189,12 +135,10 @@ export function getMobIcon(typeId: number): string {
  * Determines threat level based on mob health and category
  */
 export function determineThreatLevel(mobDef: MobDefinition, health: number, maxHealth: number): ThreatLevel {
-  // If mob is already defined with a threat level, use that
   if (mobDef.threatLevel) {
     return mobDef.threatLevel;
   }
 
-  // Otherwise, determine based on tier and health percentage
   const healthPercentage = (health / maxHealth) * 100;
 
   if (mobDef.tier >= 8) {
@@ -273,14 +217,8 @@ export function addMobDefinition(definition: MobDefinition): void {
 }
 
 /**
- * Loads mob definitions from external source
- * In production, this would fetch from a remote server or load from a file
+ * Gets total mob count
  */
-export async function loadMobDefinitionsFromSource(source: string): Promise<void> {
-  try {
-    console.log(`Loading mob definitions from ${source}`);
-    // TODO: Implement loading logic
-  } catch (error) {
-    console.error('Failed to load mob definitions:', error);
-  }
+export function getMobCount(): number {
+  return Object.keys(MOB_DEFINITIONS).length;
 }
