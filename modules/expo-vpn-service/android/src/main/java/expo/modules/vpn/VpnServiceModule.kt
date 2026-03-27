@@ -4,8 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.net.VpnService
 import android.util.Log
-import expo.modules.kotlin.Promise
-import expo.modules.kotlin.exception.Coded
+import expo.modules.core.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -49,7 +48,7 @@ class VpnServiceModule : Module() {
         AsyncFunction("hasPermission") { promise: Promise ->
             val context = appContext.reactContext
             if (context == null) {
-                promise.reject(Error("Context not available"))
+                promise.reject("ERROR", "Context not available")
                 return@AsyncFunction
             }
 
@@ -60,7 +59,7 @@ class VpnServiceModule : Module() {
         AsyncFunction("requestPermission") { promise: Promise ->
             val context = appContext.reactContext
             if (context == null) {
-                promise.reject(Error("Context not available"))
+                promise.reject("ERROR", "Context not available")
                 return@AsyncFunction
             }
 
@@ -73,7 +72,7 @@ class VpnServiceModule : Module() {
                 if (activity != null) {
                     activity.startActivityForResult(intent, VPN_REQUEST_CODE)
                 } else {
-                    promise.reject(Error("No activity available"))
+                    promise.reject("ERROR", "No activity available")
                 }
             }
         }
@@ -81,13 +80,13 @@ class VpnServiceModule : Module() {
         AsyncFunction("start") { config: Map<String, Any>, promise: Promise ->
             val context = appContext.reactContext
             if (context == null) {
-                promise.reject(Error("Context not available"))
+                promise.reject("ERROR", "Context not available")
                 return@AsyncFunction
             }
 
             val intent = VpnService.prepare(context)
             if (intent != null) {
-                promise.reject(VpnPermissionException("VPN permission not granted"))
+                promise.reject("PERMISSION_ERROR", "VPN permission not granted")
                 return@AsyncFunction
             }
 
@@ -103,14 +102,14 @@ class VpnServiceModule : Module() {
                 promise.resolve(null)
             } catch (e: Exception) {
                 Log.e(TAG, "Error starting VPN: ${e.message}")
-                promise.reject(e)
+                promise.reject("ERROR", e.message)
             }
         }
 
         AsyncFunction("stop") { promise: Promise ->
             val context = appContext.reactContext
             if (context == null) {
-                promise.reject(Error("Context not available"))
+                promise.reject("ERROR", "Context not available")
                 return@AsyncFunction
             }
 
@@ -120,7 +119,7 @@ class VpnServiceModule : Module() {
                 promise.resolve(null)
             } catch (e: Exception) {
                 Log.e(TAG, "Error stopping VPN: ${e.message}")
-                promise.reject(e)
+                promise.reject("ERROR", e.message)
             }
         }
 
@@ -164,9 +163,4 @@ class VpnServiceModule : Module() {
         )
         sendEvent("onStatusChange", status)
     }
-}
-
-class VpnPermissionException(message: String) : Coded {
-    override val code: String = "VPN_PERMISSION_ERROR"
-    override val message: String? = message
 }
