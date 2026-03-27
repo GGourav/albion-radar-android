@@ -1,152 +1,56 @@
-import { ScrollView, Text, View, TouchableOpacity, Switch } from 'react-native';
+import { ScrollView, Text, View, TouchableOpacity, Switch, Alert } from 'react-native';
 import { ScreenContainer } from '@/components/screen-container';
 import { RadarView } from '@/components/radar-view';
 import { useState, useEffect } from 'react';
-import { Resource } from '@/lib/entities/entity-manager';
+import { useRadar } from '@/hooks/use-radar';
 import { Mob } from '@/lib/entities/entity-manager';
-import { Chest } from '@/lib/entities/entity-manager';
-import { createResourceManager } from '@/lib/resources/resource-manager';
-import { createMobManager } from '@/lib/mobs/mob-manager';
-import { createEntityManager } from '@/lib/entities/entity-manager';
-import { createEventProcessor } from '@/lib/events/event-processor';
+import { getMobName } from '@/lib/data/mob-types';
 
 /**
  * Home Screen - Albion Online Radar
  * Displays real-time radar with resources, mobs, and other entities
  */
 export default function HomeScreen() {
-  const [resources, setResources] = useState<Resource[]>([]);
-  const [mobs, setMobs] = useState<Mob[]>([]);
-  const [chests, setChests] = useState<Chest[]>([]);
+  const {
+    isRunning,
+    vpnPermission,
+    resources,
+    mobs,
+    chests,
+    stats,
+    error,
+    start,
+    stop,
+    clearEntities,
+  } = useRadar({ debugMode: __DEV__ });
+
   const [showResources, setShowResources] = useState(true);
   const [showMobs, setShowMobs] = useState(true);
   const [showChests, setShowChests] = useState(true);
-  const [vpnActive, setVpnActive] = useState(false);
-  const [stats, setStats] = useState({
-    resourceCount: 0,
-    mobCount: 0,
-    chestCount: 0,
-  });
 
-  // Initialize managers
+  const handleVpnToggle = async (value: boolean) => {
+    if (value) {
+      try {
+        await start();
+      } catch (err) {
+        Alert.alert('Error', 'Failed to start VPN service');
+      }
+    } else {
+      await stop();
+    }
+  };
+
   useEffect(() => {
-    const entityManager = createEntityManager();
-    const resourceManager = createResourceManager();
-    const mobManager = createMobManager();
-    const eventProcessor = createEventProcessor(entityManager);
+    if (error) {
+      Alert.alert('Radar Error', error);
+    }
+  }, [error]);
 
-    // Subscribe to entity updates
-    entityManager.on('resource-added', (resource: Resource) => {
-      setResources((prev) => {
-        const updated = prev.filter((r) => r.id !== resource.id);
-        return [...updated, resource];
-      });
-    });
-
-    entityManager.on('mob-added', (mob: Mob) => {
-      setMobs((prev) => {
-        const updated = prev.filter((m) => m.id !== mob.id);
-        return [...updated, mob];
-      });
-    });
-
-    entityManager.on('chest-added', (chest: Chest) => {
-      setChests((prev) => {
-        const updated = prev.filter((c) => c.id !== chest.id);
-        return [...updated, chest];
-      });
-    });
-
-    // Subscribe to stats updates
-    const updateStats = () => {
-      const entityStats = entityManager.getStats();
-      setStats({
-        resourceCount: entityStats.resourceCount,
-        mobCount: entityStats.mobCount,
-        chestCount: entityStats.chestCount,
-      });
-    };
-
-    entityManager.on('resource-added', updateStats);
-    entityManager.on('resource-removed', updateStats);
-    entityManager.on('mob-added', updateStats);
-    entityManager.on('mob-removed', updateStats);
-    entityManager.on('chest-added', updateStats);
-    entityManager.on('chest-removed', updateStats);
-
-    // Add sample data for testing
-    const sampleResources: Resource[] = [
-      {
-        id: 1,
-        typeId: 0,
-        tier: 4,
-        enchantment: 0,
-        charges: 100,
-        position: { x: 100, y: 100 },
-        timestamp: Date.now(),
-      },
-      {
-        id: 2,
-        typeId: 0,
-        tier: 5,
-        enchantment: 2,
-        charges: 100,
-        position: { x: 150, y: 80 },
-        timestamp: Date.now(),
-      },
-      {
-        id: 3,
-        typeId: 23,
-        tier: 6,
-        enchantment: 1,
-        charges: 100,
-        position: { x: 80, y: 120 },
-        timestamp: Date.now(),
-      },
-    ];
-
-    const sampleMobs: Mob[] = [
-      {
-        id: 101,
-        typeId: 112,
-        health: 500,
-        maxHealth: 1000,
-        enchantment: 0,
-        position: { x: 200, y: 150 },
-        timestamp: Date.now(),
-      },
-      {
-        id: 102,
-        typeId: 3,
-        health: 300,
-        maxHealth: 500,
-        enchantment: 0,
-        position: { x: 50, y: 50 },
-        timestamp: Date.now(),
-      },
-    ];
-
-    const sampleChests: Chest[] = [
-      {
-        id: 201,
-        chestType: 1,
-        position: { x: 180, y: 200 },
-        timestamp: Date.now(),
-      },
-    ];
-
-    // Add sample data to managers
-    sampleResources.forEach((r) => entityManager.addResource(r));
-    sampleMobs.forEach((m) => entityManager.addMob(m));
-    sampleChests.forEach((c) => entityManager.addChest(c));
-
-    // Update initial stats
-    updateStats();
-
-    return () => {
-      entityManager.removeAllListeners();
-    };
-  }, []);
+  const getMobInfo = (mob: Mob) => {
+    const name = getMobName(mob.typeId);
+    const healthPercent = Math.round((mob.health / mob.maxHealth) * 100);
+    return { name, healthPercent };
+  };
 
   return (
     <ScreenContainer className="p-4">
@@ -163,19 +67,48 @@ export default function HomeScreen() {
             <View className="flex-row items-center justify-between">
               <View className="gap-1">
                 <Text className="text-base font-semibold text-foreground">VPN Service</Text>
-                <Text className="text-xs text-muted">{vpnActive ? 'Connected' : 'Disconnected'}</Text>
+                <View className="flex-row items-center gap-2">
+                  <View
+                    className={`w-2 h-2 rounded-full ${
+                      isRunning ? 'bg-green-500' : 'bg-red-500'
+                    }`}
+                  />
+                  <Text className="text-xs text-muted">
+                    {isRunning
+                      ? `Active - ${stats.packetsProcessed} packets`
+                      : vpnPermission === 'denied'
+                      ? 'Permission Denied'
+                      : 'Disconnected'}
+                  </Text>
+                </View>
               </View>
-              <Switch value={vpnActive} onValueChange={setVpnActive} />
+              {isRunning ? (
+                <TouchableOpacity
+                  className="bg-red-500 px-4 py-2 rounded-lg"
+                  onPress={() => handleVpnToggle(false)}
+                >
+                  <Text className="text-white font-semibold">Stop</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  className="bg-primary px-4 py-2 rounded-lg"
+                  onPress={() => handleVpnToggle(true)}
+                >
+                  <Text className="text-white font-semibold">Start</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
 
           {/* Radar Display */}
           <View className="bg-surface rounded-lg p-4 border border-border items-center">
-            <Text className="text-sm font-semibold text-foreground mb-3">Live Radar</Text>
+            <Text className="text-sm font-semibold text-foreground mb-3">
+              Live Radar {isRunning ? '(Active)' : '(Inactive)'}
+            </Text>
             <RadarView
-              resources={resources}
-              mobs={mobs}
-              chests={chests}
+              resources={showResources ? resources : []}
+              mobs={showMobs ? mobs : []}
+              chests={showChests ? chests : []}
               playerPosition={{ x: 0, y: 0 }}
               showResources={showResources}
               showMobs={showMobs}
@@ -205,6 +138,12 @@ export default function HomeScreen() {
                 <Text className="text-xs text-muted mt-1">Chests</Text>
               </View>
             </View>
+
+            <View className="flex-row justify-between mt-2">
+              <Text className="text-xs text-muted">Packets: {stats.packetsProcessed}</Text>
+              <Text className="text-xs text-muted">Events: {stats.eventsProcessed}</Text>
+              <Text className="text-xs text-muted">Errors: {stats.errors}</Text>
+            </View>
           </View>
 
           {/* Display Options */}
@@ -225,6 +164,34 @@ export default function HomeScreen() {
               <Text className="text-sm text-foreground">Show Chests</Text>
               <Switch value={showChests} onValueChange={setShowChests} />
             </View>
+
+            <TouchableOpacity
+              className="bg-surface border border-border px-4 py-2 rounded-lg mt-2"
+              onPress={clearEntities}
+            >
+              <Text className="text-foreground font-semibold text-center">Clear Entities</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Recent Mobs */}
+          <View className="bg-surface rounded-lg p-4 border border-border gap-2">
+            <Text className="text-base font-semibold text-foreground mb-2">Recent Mobs</Text>
+            
+            {mobs.length === 0 ? (
+              <Text className="text-xs text-muted text-center py-4">
+                {isRunning ? 'Waiting for mob data...' : 'Start VPN to detect mobs'}
+              </Text>
+            ) : (
+              mobs.slice(0, 5).map((mob) => {
+                const info = getMobInfo(mob);
+                return (
+                  <View key={mob.id} className="flex-row justify-between py-1">
+                    <Text className="text-xs text-foreground">{info.name}</Text>
+                    <Text className="text-xs text-muted">{info.healthPercent}% HP</Text>
+                  </View>
+                );
+              })
+            )}
           </View>
 
           {/* Legend */}
@@ -239,7 +206,7 @@ export default function HomeScreen() {
 
               <View className="flex-row items-center gap-2">
                 <View className="w-3 h-3 rounded-full bg-blue-500" />
-                <Text className="text-xs text-foreground">Mist Resource (Common)</Text>
+                <Text className="text-xs text-foreground">Mist Resource</Text>
               </View>
 
               <View className="flex-row items-center gap-2">
@@ -263,10 +230,6 @@ export default function HomeScreen() {
           <View className="gap-2 mb-4">
             <TouchableOpacity className="bg-primary px-6 py-3 rounded-full active:opacity-80">
               <Text className="text-background font-semibold text-center">Start Overlay</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity className="bg-surface border border-border px-6 py-3 rounded-full active:opacity-80">
-              <Text className="text-foreground font-semibold text-center">Settings</Text>
             </TouchableOpacity>
           </View>
         </View>
