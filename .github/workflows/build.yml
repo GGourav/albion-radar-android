@@ -41,16 +41,33 @@ jobs:
       - name: Create assets directory
         run: mkdir -p android/app/src/main/assets
 
+      - name: Find entry file
+        id: entry
+        run: |
+          if [ -f "index.js" ]; then
+            echo "entry=index.js" >> $GITHUB_OUTPUT
+          else
+            echo "entry=node_modules/expo/AppEntry.js" >> $GITHUB_OUTPUT
+          fi
+
       - name: Bundle JavaScript for release
         run: |
           npx react-native bundle \
             --platform android \
             --dev false \
-            --entry-file index.js \
+            --entry-file ${{ steps.entry.outputs.entry }} \
             --bundle-output android/app/src/main/assets/index.android.bundle \
             --assets-dest android/app/src/main/res
 
-      - name: Build Release APK (unsigned)
+      - name: Verify bundle exists
+        run: |
+          ls -la android/app/src/main/assets/
+          if [ ! -f "android/app/src/main/assets/index.android.bundle" ]; then
+            echo "Bundle not created!"
+            exit 1
+          fi
+
+      - name: Build Release APK
         run: |
           cd android
           ./gradlew assembleRelease --no-daemon
