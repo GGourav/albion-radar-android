@@ -1,0 +1,13 @@
+{
+  "name": "expo-vpn-service",
+  "version": "1.0.0",
+  "description": "Expo module for Android VPN packet capture",
+  "main": "src/index.ts",
+  "scripts": {},
+  "keywords": ["expo", "vpn", "android", "packet-capture"],
+  "author": "",
+  "license": "MIT",
+  "peerDependencies": {
+    "expo": ">=50.0.0"
+  }
+}
