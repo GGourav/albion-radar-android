@@ -35,29 +35,25 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: List project structure (debug)
-        run: ls -la
-
       - name: Generate Android native project
-        run: npx expo prebuild --platform android --verbose
+        run: npx expo prebuild --platform android
 
-      - name: List after prebuild (debug)
-        run: ls -la
+      - name: Create assets directory
+        run: mkdir -p android/app/src/main/assets
 
-      - name: Check if android folder exists
+      - name: Bundle JavaScript for release
         run: |
-          if [ -d "android" ]; then
-            echo "Android folder exists"
-            ls -la android/
-          else
-            echo "Android folder does NOT exist"
-            exit 1
-          fi
+          npx react-native bundle \
+            --platform android \
+            --dev false \
+            --entry-file index.js \
+            --bundle-output android/app/src/main/assets/index.android.bundle \
+            --assets-dest android/app/src/main/res
 
-      - name: Build Release APK
+      - name: Build Release APK (unsigned)
         run: |
           cd android
-          ./gradlew assembleRelease
+          ./gradlew assembleRelease --no-daemon
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
